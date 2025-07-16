@@ -2,9 +2,10 @@ import streamlit as st
 import wntr
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
+import plotly.colors as pc
 
 st.set_page_config(layout="wide")
-st.title("EPANET Node & Link Animation — Failsafe Version")
+st.title("EPANET Node & Link Animation — Reliable Color Version")
 
 uploaded = st.file_uploader("Upload EPANET INP file", type="inp")
 if uploaded:
@@ -20,7 +21,7 @@ if uploaded:
         node_names = wn.node_name_list
         link_names = wn.link_name_list
 
-        # Coordinates: fail if any missing
+        # Get coordinates, fail with clear message if any missing
         node_coords = {}
         for n in node_names:
             try:
@@ -28,7 +29,6 @@ if uploaded:
             except Exception:
                 st.error(f"Node '{n}' is missing coordinates. Please check your INP file.")
                 st.stop()
-
         link_coords = []
         for l in link_names:
             try:
@@ -82,20 +82,27 @@ if uploaded:
         # Plot
         fig = go.Figure()
 
-        link_cmin = min(link_vals)
-        link_cmax = max(link_vals)
+        # --- Links with correct colormap ---
+        vmin = min(link_vals)
+        vmax = max(link_vals)
+        cscale = pc.get_colorscale("Viridis")
+        def val_to_color(val):
+            norm = (val - vmin) / (vmax - vmin) if vmax > vmin else 0.5
+            return pc.sample_colorscale(cscale, [norm])[0]
         for row in link_df:
             xs = [node_coords[row["start"]][0], node_coords[row["end"]][0]]
             ys = [node_coords[row["start"]][1], node_coords[row["end"]][1]]
-            color = link_val_map[row["name"]]
+            color = val_to_color(link_val_map[row["name"]])
             fig.add_trace(go.Scatter(
                 x=xs, y=ys,
                 mode="lines",
-                line=dict(width=5, color=color, colorscale="Viridis", cmin=link_cmin, cmax=link_cmax),
+                line=dict(width=5, color=color),
                 showlegend=False,
                 hoverinfo="text",
-                text=f"{row['name']}: {color:.2f}"
+                text=f"{row['name']}: {link_val_map[row['name']]:.2f}"
             ))
+
+        # --- Nodes ---
         node_xs = [node_coords[n][0] for n in node_names]
         node_ys = [node_coords[n][1] for n in node_names]
         node_colors = [node_val_map[n] for n in node_names]
@@ -106,11 +113,11 @@ if uploaded:
             name=node_var,
             showlegend=False
         ))
-        # Link colorbar
+        # --- Link colorbar only (dummy) ---
         fig.add_trace(go.Scatter(
             x=[None], y=[None],
             mode="markers",
-            marker=dict(size=0.1, color=[link_cmin, link_cmax], colorscale="Viridis", colorbar=dict(title=link_var, len=0.3, y=0.2)),
+            marker=dict(size=0.1, color=[vmin, vmax], colorscale="Viridis", colorbar=dict(title=link_var, len=0.3, y=0.2)),
             showlegend=False, hoverinfo='none'
         ))
 
