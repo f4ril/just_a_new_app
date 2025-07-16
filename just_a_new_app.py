@@ -69,13 +69,17 @@ if uploaded:
     num_steps = nodes.shape[0]
 
     st.subheader("Dynamic Animation")
-    animate = st.checkbox("Enable animation")
-    velocity = st.slider("Animation velocity (seconds per frame)", 0.1, 2.0, 0.5, 0.1)
-
+    if "animate" not in st.session_state:
+        st.session_state.animate = True
     if "frame" not in st.session_state:
         st.session_state.frame = 0
     if "playing" not in st.session_state:
-        st.session_state.playing = False
+        st.session_state.playing = True
+    if "velocity" not in st.session_state:
+        st.session_state.velocity = 0.2
+
+    animate = st.checkbox("Enable animation", value=st.session_state.animate, key="animate")
+    velocity = st.slider("Animation velocity (seconds per frame)", 0.05, 2.0, st.session_state.velocity, 0.05, key="velocity")
 
     c1, c2, c3 = st.columns([1,1,4])
     with c1:
