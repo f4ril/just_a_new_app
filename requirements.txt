@@ -1,5 +1,6 @@
 streamlit
 streamlit-autorefresh
+imageio
 setuptools
 matplotlib
 plotly
