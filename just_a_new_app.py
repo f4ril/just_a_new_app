@@ -5,7 +5,7 @@ import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(layout="wide")
-st.title("EPANET Animated Network Visualization (Nodes and Links Together)")
+st.title("EPANET Animated Network Visualization (Nodes + Links)")
 
 uploaded = st.file_uploader("Upload EPANET INP file", type="inp")
 if uploaded:
@@ -62,8 +62,8 @@ if uploaded:
         frame = st.slider("Timestep", 0, num_steps - 1, st.session_state.frame, 1)
         st.session_state.frame = frame
 
-    # Animation: only advance if playing, animation enabled, and NOT slider-dragging
-    if animate and st.session_state.playing and num_steps > 1 and not st.session_state._shown_slider_changed:
+    # Animate: advance frame if animating and playing
+    if animate and st.session_state.playing and num_steps > 1:
         st_autorefresh(interval=int(velocity*1000), key="anim_refresh")
         st.session_state.frame = (st.session_state.frame + 1) % num_steps
 
@@ -74,9 +74,8 @@ if uploaded:
     link_df["value"] = link_df["name"].map(link_vals)
 
     fig = go.Figure()
-    link_colors = link_df["value"]
-    link_color_min = link_colors.min()
-    link_color_max = link_colors.max()
+    link_color_min = link_df["value"].min()
+    link_color_max = link_df["value"].max()
     for i, row in link_df.iterrows():
         n1 = node_df[node_df["name"] == row["start"]].iloc[0]
         n2 = node_df[node_df["name"] == row["end"]].iloc[0]
@@ -106,8 +105,6 @@ if uploaded:
         ),
         name=node_var
     ))
-
-    # Add hidden scatter for link colorbar (hack: Plotly limitation in Streamlit)
     fig.add_trace(go.Scatter(
         x=[None], y=[None],
         mode="markers",
