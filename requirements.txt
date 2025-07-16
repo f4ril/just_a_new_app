@@ -1,4 +1,5 @@
 streamlit
+setuptools
 matplotlib
 numpy
 scipy 
