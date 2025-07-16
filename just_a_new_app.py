@@ -2,8 +2,9 @@ import streamlit as st
 import wntr
 import plotly.graph_objects as go
 import pandas as pd
+import time
 
-st.title("EPANET Interactive Viewer & Results")
+st.title("EPANET Interactive Viewer & Dynamic Results")
 
 uploaded = st.file_uploader("Upload INP file", type="inp")
 if uploaded:
@@ -12,7 +13,7 @@ if uploaded:
         f.write(uploaded.read())
     wn = wntr.network.WaterNetworkModel(path)
 
-    # Build dataframe of node positions and types
+    # Node and link setup as before...
     node_data = []
     for n in wn.node_name_list:
         x, y = wn.get_node(n).coordinates
@@ -27,7 +28,6 @@ if uploaded:
         node_data.append(dict(name=n, x=x, y=y, type=t))
     node_df = pd.DataFrame(node_data)
 
-    # Build dataframe for links (pipes, pumps, valves)
     link_data = []
     for l in wn.link_name_list:
         start = wn.get_link(l).start_node_name
@@ -35,42 +35,74 @@ if uploaded:
         link_data.append(dict(name=l, start=start, end=end))
     link_df = pd.DataFrame(link_data)
 
-    # Interactive plot
-    fig = go.Figure()
     colors = dict(junction="blue", tank="red", reservoir="green", other="gray")
-    for t in node_df["type"].unique():
-        df = node_df[node_df["type"] == t]
-        fig.add_trace(go.Scatter(
-            x=df["x"], y=df["y"], mode="markers+text",
-            marker=dict(size=10, color=colors.get(t, "gray")),
-            text=df["name"], textposition="top center",
-            name=t.capitalize()
-        ))
-    for _, row in link_df.iterrows():
-        n1 = node_df[node_df["name"] == row["start"]].iloc[0]
-        n2 = node_df[node_df["name"] == row["end"]].iloc[0]
-        fig.add_trace(go.Scatter(
-            x=[n1["x"], n2["x"]], y=[n1["y"], n2["y"]],
-            mode="lines", line=dict(width=2, color="gray"),
-            showlegend=False
-        ))
-    fig.update_layout(
-        title="Network (interactive)", xaxis_title="X", yaxis_title="Y",
-        width=900, height=600, margin=dict(l=10, r=10, t=30, b=10)
-    )
-    st.plotly_chart(fig, use_container_width=True)
 
-    # --- Run Simulation and Display Results ---
+    # Initial static network
+    with st.expander("Network Visualization", expanded=True):
+        fig = go.Figure()
+        for t in node_df["type"].unique():
+            df = node_df[node_df["type"] == t]
+            fig.add_trace(go.Scatter(
+                x=df["x"], y=df["y"], mode="markers+text",
+                marker=dict(size=13, color=colors.get(t, "gray"), line=dict(width=2, color="white")),
+                text=df["name"], textposition="top center", name=t.capitalize()
+            ))
+        for _, row in link_df.iterrows():
+            n1 = node_df[node_df["name"] == row["start"]].iloc[0]
+            n2 = node_df[node_df["name"] == row["end"]].iloc[0]
+            fig.add_trace(go.Scatter(
+                x=[n1["x"], n2["x"]], y=[n1["y"], n2["y"]],
+                mode="lines", line=dict(width=2, color="#bbbbbb"),
+                hoverinfo="none", showlegend=False
+            ))
+        fig.update_layout(
+            title="Network (zoom & pan enabled)",
+            xaxis=dict(showgrid=False, zeroline=False, visible=False),
+            yaxis=dict(showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
+            width=850, height=600, margin=dict(l=10, r=10, t=30, b=10),
+            plot_bgcolor='white'
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # --- Simulation ---
     st.header("Hydraulic Simulation Results")
     sim = wntr.sim.EpanetSimulator(wn)
     results = sim.run_sim()
 
     variable = st.selectbox("Result variable", ["pressure", "demand", "head", "leak_demand"])
     nodes = results.node[variable]
-    timestep = st.slider("Timestep", 0, nodes.shape[0] - 1, 0)
+    num_steps = nodes.shape[0]
+
+    # Animation controls
+    st.subheader("Dynamic Results Animation")
+    animate = st.checkbox("Enable animation")
+    velocity = st.slider("Animation velocity (seconds per frame)", 0.1, 2.0, 0.5, 0.1)
+
+    if "frame" not in st.session_state:
+        st.session_state.frame = 0
+    if "playing" not in st.session_state:
+        st.session_state.playing = False
+
+    # Animation play/pause buttons
+    c1, c2, c3 = st.columns([1,1,2])
+    with c1:
+        if st.button("Play"):
+            st.session_state.playing = True
+    with c2:
+        if st.button("Pause"):
+            st.session_state.playing = False
+    with c3:
+        frame = st.slider("Timestep", 0, num_steps - 1, st.session_state.frame, 1)
+        st.session_state.frame = frame
+
+    if animate and st.session_state.playing:
+        st.session_state.frame = (st.session_state.frame + 1) % num_steps
+        time.sleep(velocity)
+        st.experimental_rerun()
+
+    timestep = st.session_state.frame
     vals = nodes.iloc[timestep]
 
-    # Map result values to color
     node_df["value"] = node_df["name"].map(vals)
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
@@ -88,8 +120,11 @@ if uploaded:
             showlegend=False
         ))
     fig2.update_layout(
-        title=f"Node {variable.capitalize()} (Timestep {timestep})", xaxis_title="X", yaxis_title="Y",
-        width=900, height=600, margin=dict(l=10, r=10, t=30, b=10)
+        title=f"Node {variable.capitalize()} (Timestep {timestep})",
+        xaxis=dict(showgrid=False, zeroline=False, visible=False),
+        yaxis=dict(showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
+        width=850, height=600, margin=dict(l=10, r=10, t=30, b=10),
+        plot_bgcolor='white'
     )
     st.plotly_chart(fig2, use_container_width=True)
 
