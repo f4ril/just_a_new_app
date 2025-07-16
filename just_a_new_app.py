@@ -14,16 +14,9 @@ if uploaded:
         f.write(uploaded.read())
     wn = wntr.network.WaterNetworkModel(path)
 
-    node_data = []
-    for n in wn.node_name_list:
-        x, y = wn.get_node(n).coordinates
-        node_data.append(dict(name=n, x=x, y=y))
+    node_data = [{"name": n, "x": wn.get_node(n).coordinates[0], "y": wn.get_node(n).coordinates[1]} for n in wn.node_name_list]
     node_df = pd.DataFrame(node_data)
-    link_data = []
-    for l in wn.link_name_list:
-        start = wn.get_link(l).start_node_name
-        end = wn.get_link(l).end_node_name
-        link_data.append(dict(name=l, start=start, end=end))
+    link_data = [{"name": l, "start": wn.get_link(l).start_node_name, "end": wn.get_link(l).end_node_name} for l in wn.link_name_list]
     link_df = pd.DataFrame(link_data)
 
     sim = wntr.sim.EpanetSimulator(wn)
@@ -31,10 +24,10 @@ if uploaded:
     node_vars = list(results.node.keys())
     link_vars = list(results.link.keys())
 
-    cvars1, cvars2 = st.columns(2)
-    with cvars1:
+    col1, col2 = st.columns(2)
+    with col1:
         node_var = st.selectbox("Node variable", node_vars, index=node_vars.index("pressure") if "pressure" in node_vars else 0)
-    with cvars2:
+    with col2:
         link_var = st.selectbox("Link variable", link_vars, index=link_vars.index("flowrate") if "flowrate" in link_vars else 0)
 
     node_data_all = results.node[node_var]
@@ -52,6 +45,7 @@ if uploaded:
 
     animate = st.checkbox("Enable animation", value=st.session_state.animate, key="animate")
     velocity = st.slider("Animation velocity (seconds per frame)", 0.05, 2.0, st.session_state.velocity, 0.05, key="velocity")
+
     c1, c2, c3 = st.columns([1,1,4])
     with c1:
         if st.button("Play"):
@@ -59,15 +53,18 @@ if uploaded:
         if st.button("Pause"):
             st.session_state.playing = False
     with c3:
-        frame = st.slider("Timestep", 0, num_steps - 1, st.session_state.frame, 1)
+        frame = st.slider("Timestep", 0, max(num_steps - 1, 0), st.session_state.frame, 1)
         st.session_state.frame = frame
 
-    # Animate: advance frame if animating and playing
     if animate and st.session_state.playing and num_steps > 1:
-        st_autorefresh(interval=int(velocity*1000), key="anim_refresh")
+        st_autorefresh(interval=int(velocity * 1000), key="anim_refresh")
         st.session_state.frame = (st.session_state.frame + 1) % num_steps
 
     timestep = st.session_state.frame
+    if timestep >= num_steps:
+        timestep = 0
+        st.session_state.frame = 0
+
     node_vals = node_data_all.iloc[timestep]
     link_vals = link_data_all.iloc[timestep]
     node_df["value"] = node_df["name"].map(node_vals)
@@ -98,20 +95,21 @@ if uploaded:
         marker=dict(
             size=15,
             color=node_df["value"],
-            colorbar=dict(title=node_var),
+            colorbar=dict(title=node_var, len=0.4, y=0.8),
             colorscale="Viridis",
             line=dict(width=2, color="white"),
             showscale=True
         ),
         name=node_var
     ))
+    # Trick for a separate link colorbar
     fig.add_trace(go.Scatter(
         x=[None], y=[None],
         mode="markers",
         marker=dict(
             size=0.1,
             color=[link_color_min, link_color_max],
-            colorbar=dict(title=link_var, len=0.7, y=0.5),
+            colorbar=dict(title=link_var, len=0.4, y=0.2),
             colorscale="Viridis",
             showscale=True
         ),
