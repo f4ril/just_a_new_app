@@ -1,139 +1,117 @@
 import streamlit as st
 import wntr
 import plotly.graph_objects as go
-import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(layout="wide")
-st.title("EPANET Animated Network Visualization (Nodes + Links)")
+st.title("EPANET Node & Link Animation")
 
 uploaded = st.file_uploader("Upload EPANET INP file", type="inp")
 if uploaded:
-    path = "temp.inp"
+    path = "uploaded.inp"
     with open(path, "wb") as f:
         f.write(uploaded.read())
     wn = wntr.network.WaterNetworkModel(path)
-
-    node_data = [{"name": n, "x": wn.get_node(n).coordinates[0], "y": wn.get_node(n).coordinates[1]} for n in wn.node_name_list]
-    node_df = pd.DataFrame(node_data)
-    link_data = [{"name": l, "start": wn.get_link(l).start_node_name, "end": wn.get_link(l).end_node_name} for l in wn.link_name_list]
-    link_df = pd.DataFrame(link_data)
-
     sim = wntr.sim.EpanetSimulator(wn)
     results = sim.run_sim()
     node_vars = list(results.node.keys())
     link_vars = list(results.link.keys())
+    node_names = wn.node_name_list
+    link_names = wn.link_name_list
 
-    col1, col2 = st.columns(2)
-    with col1:
-        node_var = st.selectbox("Node variable", node_vars, index=node_vars.index("pressure") if "pressure" in node_vars else 0)
-    with col2:
-        link_var = st.selectbox("Link variable", link_vars, index=link_vars.index("flowrate") if "flowrate" in link_vars else 0)
+    # DataFrames for coordinates
+    node_coords = {n: wn.get_node(n).coordinates for n in node_names}
+    link_coords = [(wn.get_link(l).start_node_name, wn.get_link(l).end_node_name) for l in link_names]
+    node_df = [{"name": n, "x": node_coords[n][0], "y": node_coords[n][1]} for n in node_names]
+    link_df = [{"name": l, "start": s, "end": e} for l, (s, e) in zip(link_names, link_coords)]
 
-    node_data_all = results.node[node_var]
-    link_data_all = results.link[link_var]
-    num_steps = node_data_all.shape[0]
+    node_var = st.selectbox("Node variable", node_vars, index=node_vars.index("pressure") if "pressure" in node_vars else 0)
+    link_var = st.selectbox("Link variable", link_vars, index=link_vars.index("flowrate") if "flowrate" in link_vars else 0)
 
-    if "animate" not in st.session_state:
-        st.session_state.animate = True
+    node_data = results.node[node_var]
+    link_data = results.link[link_var]
+    num_steps = node_data.shape[0]
+
+    # Animation controls
     if "frame" not in st.session_state:
         st.session_state.frame = 0
     if "playing" not in st.session_state:
         st.session_state.playing = True
     if "velocity" not in st.session_state:
         st.session_state.velocity = 0.2
-
-    animate = st.checkbox("Enable animation", value=st.session_state.animate, key="animate")
-    velocity = st.slider("Animation velocity (seconds per frame)", 0.05, 2.0, st.session_state.velocity, 0.05, key="velocity")
-
-    c1, c2, c3 = st.columns([1,1,4])
-    with c1:
+    velocity = st.slider("Animation velocity (seconds per frame)", 0.05, 2.0, st.session_state.velocity, 0.05)
+    play, pause, slider = st.columns([1,1,4])
+    with play:
         if st.button("Play"):
             st.session_state.playing = True
+    with pause:
         if st.button("Pause"):
             st.session_state.playing = False
-    with c3:
-        frame = st.slider("Timestep", 0, max(num_steps - 1, 0), st.session_state.frame, 1)
+    with slider:
+        frame = st.slider("Timestep", 0, num_steps - 1, st.session_state.frame, 1)
         st.session_state.frame = frame
 
-    if animate and st.session_state.playing and num_steps > 1:
-        st_autorefresh(interval=int(velocity * 1000), key="anim_refresh")
+    if st.session_state.playing and num_steps > 1:
+        st_autorefresh(interval=int(velocity*1000), key="anim_refresh")
         st.session_state.frame = (st.session_state.frame + 1) % num_steps
 
-    timestep = st.session_state.frame
-    if timestep >= num_steps:
-        timestep = 0
-        st.session_state.frame = 0
+    t = st.session_state.frame
+    node_vals = node_data.iloc[t]
+    link_vals = link_data.iloc[t]
 
-    node_vals = node_data_all.iloc[timestep]
-    link_vals = link_data_all.iloc[timestep]
-    node_df["value"] = node_df["name"].map(node_vals)
-    link_df["value"] = link_df["name"].map(link_vals)
+    # Prepare node and link color data
+    node_val_map = {n: node_vals[n] for n in node_names}
+    link_val_map = {l: link_vals[l] for l in link_names}
 
+    # Plot
     fig = go.Figure()
-    link_color_min = link_df["value"].min()
-    link_color_max = link_df["value"].max()
-    for i, row in link_df.iterrows():
-        n1 = node_df[node_df["name"] == row["start"]].iloc[0]
-        n2 = node_df[node_df["name"] == row["end"]].iloc[0]
+
+    link_cmin = min(link_vals)
+    link_cmax = max(link_vals)
+    for row in link_df:
+        xs = [node_coords[row["start"]][0], node_coords[row["end"]][0]]
+        ys = [node_coords[row["start"]][1], node_coords[row["end"]][1]]
+        color = link_val_map[row["name"]]
         fig.add_trace(go.Scatter(
-            x=[n1["x"], n2["x"]], y=[n1["y"], n2["y"]],
+            x=xs, y=ys,
             mode="lines",
-            line=dict(
-                width=5,
-                color=row["value"],
-                colorscale="Viridis",
-                cmin=link_color_min,
-                cmax=link_color_max
-            ),
+            line=dict(width=5, color=color, colorscale="Viridis", cmin=link_cmin, cmax=link_cmax),
+            showlegend=False,
             hoverinfo="text",
-            text=f"{row['name']}: {row['value']:.2f}",
-            showlegend=False
+            text=f"{row['name']}: {color:.2f}"
         ))
+    # Node coloring
+    node_xs = [node_coords[n][0] for n in node_names]
+    node_ys = [node_coords[n][1] for n in node_names]
+    node_colors = [node_val_map[n] for n in node_names]
     fig.add_trace(go.Scatter(
-        x=node_df["x"], y=node_df["y"], mode="markers",
-        marker=dict(
-            size=15,
-            color=node_df["value"],
-            colorbar=dict(title=node_var, len=0.4, y=0.8),
-            colorscale="Viridis",
-            line=dict(width=2, color="white"),
-            showscale=True
-        ),
-        name=node_var
+        x=node_xs, y=node_ys,
+        mode="markers",
+        marker=dict(size=15, color=node_colors, colorscale="Viridis", colorbar=dict(title=node_var), line=dict(width=2, color="white")),
+        name=node_var,
+        showlegend=False
     ))
-    # Trick for a separate link colorbar
+    # Trick to get link colorbar
     fig.add_trace(go.Scatter(
         x=[None], y=[None],
         mode="markers",
-        marker=dict(
-            size=0.1,
-            color=[link_color_min, link_color_max],
-            colorbar=dict(title=link_var, len=0.4, y=0.2),
-            colorscale="Viridis",
-            showscale=True
-        ),
-        showlegend=False,
-        hoverinfo='none'
+        marker=dict(size=0.1, color=[link_cmin, link_cmax], colorscale="Viridis", colorbar=dict(title=link_var, len=0.3, y=0.2)),
+        showlegend=False, hoverinfo='none'
     ))
 
     fig.update_layout(
-        title=f"Node: {node_var} | Link: {link_var} (Timestep {timestep+1}/{num_steps})",
+        title=f"Node: {node_var} | Link: {link_var} (Timestep {t+1}/{num_steps})",
         xaxis=dict(showgrid=False, zeroline=False, visible=False),
         yaxis=dict(showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
         width=1000, height=700, margin=dict(l=10, r=10, t=30, b=10),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        font=dict(color='black')
+        plot_bgcolor='white', paper_bgcolor='white', font=dict(color='black')
     )
     st.plotly_chart(fig, use_container_width=True)
-
-    st.write(f"Nodes: {node_var} | Links: {link_var} | Timestep: {timestep+1}/{num_steps}")
 
     if st.toggle("Show node table"):
         st.dataframe(node_vals)
     if st.toggle("Show link table"):
         st.dataframe(link_vals)
 
-    st.download_button("Download node values as CSV", node_vals.to_csv().encode(), f"{node_var}_timestep_{timestep}.csv")
-    st.download_button("Download link values as CSV", link_vals.to_csv().encode(), f"{link_var}_timestep_{timestep}.csv")
+    st.download_button("Download node values as CSV", node_vals.to_csv().encode(), f"{node_var}_timestep_{t}.csv")
+    st.download_button("Download link values as CSV", link_vals.to_csv().encode(), f"{link_var}_timestep_{t}.csv")
