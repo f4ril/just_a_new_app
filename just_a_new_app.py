@@ -13,7 +13,6 @@ if uploaded:
         f.write(uploaded.read())
     wn = wntr.network.WaterNetworkModel(path)
 
-    # Node and link setup as before...
     node_data = []
     for n in wn.node_name_list:
         x, y = wn.get_node(n).coordinates
@@ -37,33 +36,6 @@ if uploaded:
 
     colors = dict(junction="blue", tank="red", reservoir="green", other="gray")
 
-    # Initial static network
-    with st.expander("Network Visualization", expanded=True):
-        fig = go.Figure()
-        for t in node_df["type"].unique():
-            df = node_df[node_df["type"] == t]
-            fig.add_trace(go.Scatter(
-                x=df["x"], y=df["y"], mode="markers+text",
-                marker=dict(size=13, color=colors.get(t, "gray"), line=dict(width=2, color="white")),
-                text=df["name"], textposition="top center", name=t.capitalize()
-            ))
-        for _, row in link_df.iterrows():
-            n1 = node_df[node_df["name"] == row["start"]].iloc[0]
-            n2 = node_df[node_df["name"] == row["end"]].iloc[0]
-            fig.add_trace(go.Scatter(
-                x=[n1["x"], n2["x"]], y=[n1["y"], n2["y"]],
-                mode="lines", line=dict(width=2, color="#bbbbbb"),
-                hoverinfo="none", showlegend=False
-            ))
-        fig.update_layout(
-            title="Network (zoom & pan enabled)",
-            xaxis=dict(showgrid=False, zeroline=False, visible=False),
-            yaxis=dict(showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
-            width=850, height=600, margin=dict(l=10, r=10, t=30, b=10),
-            plot_bgcolor='white'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
     # --- Simulation ---
     st.header("Hydraulic Simulation Results")
     sim = wntr.sim.EpanetSimulator(wn)
@@ -78,31 +50,35 @@ if uploaded:
     animate = st.checkbox("Enable animation")
     velocity = st.slider("Animation velocity (seconds per frame)", 0.1, 2.0, 0.5, 0.1)
 
+    # Session state for animation
     if "frame" not in st.session_state:
         st.session_state.frame = 0
     if "playing" not in st.session_state:
         st.session_state.playing = False
 
-    # Animation play/pause buttons
-    c1, c2, c3 = st.columns([1,1,2])
-    with c1:
+    # Buttons and slider
+    col1, col2, col3 = st.columns([1,1,4])
+    with col1:
         if st.button("Play"):
             st.session_state.playing = True
-    with c2:
         if st.button("Pause"):
             st.session_state.playing = False
-    with c3:
+    with col3:
         frame = st.slider("Timestep", 0, num_steps - 1, st.session_state.frame, 1)
         st.session_state.frame = frame
 
+    # Animation logic: Only move frame if animate is enabled and playing
     if animate and st.session_state.playing:
-        st.session_state.frame = (st.session_state.frame + 1) % num_steps
+        # Don't use st.experimental_rerun(), instead rely on autorefresh
         time.sleep(velocity)
-        st.experimental_rerun()
+        st.session_state.frame = (st.session_state.frame + 1) % num_steps
+        st.write(f"Animating... frame: {st.session_state.frame}")
+        st.experimental_rerun()  # This is the safest place for rerun (end of script)
+    else:
+        st.write(f"Static... frame: {st.session_state.frame}")
 
     timestep = st.session_state.frame
     vals = nodes.iloc[timestep]
-
     node_df["value"] = node_df["name"].map(vals)
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(
